@@ -6,17 +6,33 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- API Keys ---
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# Dynamically route OpenAI client to TokenRouter (Minimax) if present, otherwise direct OpenAI
+if os.getenv("MINIMAX_API_KEY") and os.getenv("MINIMAX_API_KEY") != "sk-":
+    OPENAI_API_KEY = os.getenv("MINIMAX_API_KEY", "")
+    OPENAI_BASE_URL = os.getenv("MINIMAX_BASE_URL", "https://api.tokenrouter.com/v1")
+    OPENAI_MODEL = os.getenv("MINIMAX_MODEL", "MiniMax-M3")
+    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+    os.environ["OPENAI_BASE_URL"] = OPENAI_BASE_URL
+else:
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_BASE_URL = ""
+    OPENAI_MODEL = "gpt-4o-mini"
 
-# --- Qdrant ---
-QDRANT_HOST = "localhost"
-QDRANT_PORT = 6333
+
+COHERE_API_KEY = os.getenv("COHERE_API_KEY", "")
+JINA_API_KEY = os.getenv("JINA_API_KEY", "")
+WEAVIATE_URL = os.getenv("WEAVIATE_URL", "")
+WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY", "")
+
+# --- Weaviate / Qdrant ---
+# We keep these for interface compatibility, but we will route index/search to Weaviate Cloud
 COLLECTION_NAME = "lab18_production"
 NAIVE_COLLECTION = "lab18_naive"
 
 # --- Embedding ---
-EMBEDDING_MODEL = "BAAI/bge-m3"
+EMBEDDING_MODEL = "embed-multilingual-v3.0"
 EMBEDDING_DIM = 1024
+
 
 # --- Chunking ---
 HIERARCHICAL_PARENT_SIZE = 2048

@@ -81,14 +81,21 @@ def generate_hypothesis_questions(text: str, n_questions: int = 3) -> list[str]:
             resp = client.chat.completions.create(
                 model=OPENAI_MODEL,
                 messages=[
-                    {"role": "system", "content": f"Dựa trên đoạn văn, tạo {n_questions} câu hỏi bằng tiếng Việt mà đoạn văn có thể trả lời. Trả về mỗi câu hỏi trên 1 dòng."},
+                    {"role": "system", "content": f"Dựa trên đoạn văn, tạo {n_questions} câu hỏi bằng tiếng Việt mà đoạn văn có thể trả lời. Hãy nhớ kết thúc mỗi câu hỏi bằng dấu chấm hỏi '?'. Trả về mỗi câu hỏi trên 1 dòng."},
                     {"role": "user", "content": text},
                 ],
                 max_tokens=200,
             )
             cleaned = clean_llm_response(resp.choices[0].message.content)
             questions = cleaned.split("\n")
-            return [q.strip().lstrip("0123456789.-) ") for q in questions if q.strip()][:n_questions]
+            processed_qs = []
+            for q in questions:
+                q_strip = q.strip().lstrip("0123456789.-) ")
+                if q_strip:
+                    if not q_strip.endswith("?"):
+                        q_strip += "?"
+                    processed_qs.append(q_strip)
+            return processed_qs[:n_questions]
         except Exception as e:
             print(f"  ⚠️  OpenAI HyQA failed: {e}")
             
@@ -186,7 +193,7 @@ def _enrich_single_call(text: str, source: str) -> dict:
 }"""},
                     {"role": "user", "content": f"Tài liệu: {source}\n\nĐoạn văn:\n{text}"},
                 ],
-                max_tokens=400,
+                max_tokens=1000,
             )
             cleaned = clean_llm_response(resp.choices[0].message.content)
             if cleaned.startswith("```json"):
@@ -208,7 +215,7 @@ def enrich_chunks(
     methods: list[str] | None = None,
 ) -> list[EnrichedChunk]:
     """
-    Chạy enrichment pipeline trên danh sách chunks. (Đã implement sẵn — dùng functions ở trên)
+    Chạy enrichment pipeline trên danh sách chunks. (Đã song song hóa bằng ThreadPoolExecutor)
 
     Có 2 chế độ:
     - methods cụ thể (["summary"], ["contextual"]...): gọi từng function riêng (tốt cho học/debug)
@@ -224,8 +231,9 @@ def enrich_chunks(
 
     use_combined = "combined" in methods
 
-    enriched = []
-    for i, chunk in enumerate(chunks):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def process_single_chunk(index: int, chunk: dict) -> tuple[int, EnrichedChunk]:
         text = chunk["text"]
         source = chunk.get("metadata", {}).get("source", "")
 
@@ -242,19 +250,27 @@ def enrich_chunks(
             enriched_text = contextual_prepend(text, source) if "contextual" in methods else text
             auto_meta = extract_metadata(text) if "metadata" in methods else {}
 
-        enriched.append(EnrichedChunk(
+        return index, EnrichedChunk(
             original_text=text,
             enriched_text=enriched_text,
             summary=summary,
             hypothesis_questions=questions,
             auto_metadata={**chunk.get("metadata", {}), **auto_meta},
             method="+".join(methods),
-        ))
+        )
 
-        if (i + 1) % 10 == 0 or (i + 1) == len(chunks):
-            print(f"  Enriched {i + 1}/{len(chunks)} chunks...", flush=True)
+    enriched_results = [None] * len(chunks)
+    completed_count = 0
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(process_single_chunk, idx, chunk): idx for idx, chunk in enumerate(chunks)}
+        for future in as_completed(futures):
+            idx, res = future.result()
+            enriched_results[idx] = res
+            completed_count += 1
+            if completed_count % 10 == 0 or completed_count == len(chunks):
+                print(f"  Enriched {completed_count}/{len(chunks)} chunks...", flush=True)
 
-    return enriched
+    return enriched_results
 
 
 # ─── Main ────────────────────────────────────────────────

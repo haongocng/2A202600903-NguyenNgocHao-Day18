@@ -115,10 +115,14 @@ class DenseSearch:
         client = self._get_client()
         class_name = self._get_weaviate_class_name(collection)
         
-        # Recreate collection
-        if client.collections.exists(class_name):
-            client.collections.delete(class_name)
-            
+        # Clean up any and all existing collections in the Weaviate sandbox to guarantee we stay within the 1-collection limit
+        try:
+            collections_list = client.collections.list_all()
+            for existing_name in collections_list.keys():
+                client.collections.delete(existing_name)
+        except Exception as delete_err:
+            print(f"  ⚠️  Warning clearing other collections: {delete_err}", flush=True)
+
         collection_obj = client.collections.create(
             name=class_name,
             vectorizer_config=None
